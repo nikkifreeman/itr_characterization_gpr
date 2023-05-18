@@ -1,0 +1,254 @@
+---
+title: "3_simulation1D4_analysis"
+output: html_notebook
+---
+
+```{r, message = FALSE}
+library(tidyverse)
+library(xtable)
+```
+
+Setting 3 in the manuscript!
+
+```{r, message = FALSE}
+# Get the true values
+trueOpt <- vector(length = 0)
+trueValues_list <- list()
+for(i in c(0.75, 1, 1.25)){
+  trueValues <- read_csv(paste0("../2_pipeline/3_simulation1D4_", i, "_trueValues.csv")) %>%
+    mutate(sigma = i)
+  trueValues_list <- append(trueValues_list, list(trueValues))
+  trueOpt <- c(trueOpt, max(trueValues$value))
+}
+
+
+# Get the simulation results
+relativePathToResults <- "../2_pipeline/3_simulation1D4_results"
+filenames <- list.files(relativePathToResults)
+
+# Gather all of the results in a list
+allResults_list <- map(paste0(relativePathToResults, "/", filenames), read_csv)
+
+# Add the meta data to the results
+metaData <- str_split(str_sub(filenames, start = 17), pattern = "_")
+addMetaData <- function(resultsDF, metaDataVect, trueOpt){
+  resultsDF %>%
+    mutate(evalMethod = metaDataVect[1],
+           nObs = metaDataVect[2],
+           sigma = metaDataVect[3]) %>% 
+    mutate(sigma = str_extract(sigma, ".+(?=.csv)")) %>%
+    mutate(sigma = as.numeric(sigma)) %>%
+    mutate(trueOpt = if_else(sigma == 0.75, trueOpt[1], if_else(sigma == 1, trueOpt[2], trueOpt[3])))
+}
+
+# Add the true values to the results
+
+
+allResults_list <- map2(allResults_list, metaData, addMetaData, trueOpt)
+allResults <- reduce(allResults_list, bind_rows)
+```
+
+Visualization
+```{r}
+allResults %>%
+  filter(nObs == 1000) %>%
+  mutate(optDTR_value = -1*optDTR_value)%>%
+  mutate(deltaTrueOpt = optDTR_value - trueOpt) %>%
+  ggplot(aes(x = deltaTrueOpt)) +
+  geom_vline(xintercept = 0) +
+  geom_histogram(bins = 10) +
+  facet_grid(sigma~evalMethod) +
+  theme_minimal()
+
+allResults %>%
+  mutate(optDTR_value = -1*optDTR_value) %>%
+  mutate(deltaTrueOpt = optDTR_value - trueOpt) %>%
+  ggplot(aes(y = deltaTrueOpt, x = evalMethod)) +
+  geom_boxplot() +
+  facet_grid(sigma~nObs)
+
+trueValueContourPlot <- reduce(trueValues_list, bind_rows) %>%
+  mutate(sigma = paste0("w=", sigma)) %>%
+  ggplot(aes(x = beta0, y = beta1, z = value)) +
+  geom_contour_filled(binwidth = 0.1) +
+  facet_grid(.~sigma) +
+  theme_minimal() +
+  xlab(expression(beta[0])) +
+  ylab(expression(beta[1])) +
+  guides(fill=guide_legend(title="Value", reverse = TRUE)) +
+  theme(axis.text = element_text(size = 6))
+# ggsave("../3_output/3_simulation1D4_trueValueContourPlot.png", device = "png",
+#        width = 6.5, height = 3.5, units = "in", bg='#ffffff')
+
+createContourScatterPlot <- function(position, s, binWidth){
+  p <- trueValues_list[[position]] %>%
+    ggplot(aes(x = beta0, y = beta1, z = value)) +
+    geom_contour_filled(binwidth = binWidth) +
+    geom_point(data = allResults %>% filter(sigma == s) %>% 
+                 mutate(nObs = paste0("N = ", nObs),
+                        nObs = factor(nObs, levels = c("N = 200", "N = 500", "N = 1000"))), 
+               aes(x = beta0, y = beta1, z = optDTR_value),
+               shape = 1, alpha = 0.5) +
+    facet_grid(nObs~evalMethod) + 
+    theme_minimal() +
+    guides(fill = guide_legend(title = "Value", reverse = TRUE)) +
+    xlab(expression(beta[0])) +
+    ylab(expression(beta[1])) +
+    theme(axis.text = element_text(size = 6))
+  ggsave(paste0("../3_output/3_simulation1D4_contourScatter_", position,".png"), plot = p, 
+         device = "png", width = 6.5, height = 3.5, units = "in", bg='#ffffff')
+}
+
+# createContourScatterPlot(1, 0.75, 0.1)
+# createContourScatterPlot(2, 1, 0.1)
+# createContourScatterPlot(3, 1.25, 0.1)
+```
+
+Numeric summary
+
+```{r}
+summaryResults <- allResults %>%
+  group_by(evalMethod, nObs, sigma) %>%
+  summarise(meanNormSup = mean(norm_sup),
+            meanNorm1 = mean(norm_1),
+            meanNorm2 = mean(norm_2),
+            mse = mean((-1*optDTR_value - trueOpt)^2),
+            mse_error = sqrt(sum(((-1*optDTR_value - trueOpt)^2 - mse)^2)/(1000*(1000-1)))) %>%
+  ungroup()
+
+# Create results for table 1 (optimal DTR mse)
+temp1 <- summaryResults %>%
+  filter(evalMethod == "AIPWE") %>%
+  mutate(nObs = as.numeric(nObs)) %>%
+  arrange(nObs, sigma) %>%
+  select(evalMethod, nObs, sigma, mse, mse_error) %>%
+  mutate(mse_aipwe = round(mse, 4),
+         mse_error_aipwe = round(mse_error, 4)) %>%
+  select(-c(mse, mse_error, evalMethod))
+
+temp2 <- summaryResults %>%
+  filter(evalMethod == "IPW") %>%
+  mutate(nObs = as.numeric(nObs)) %>%
+  arrange(nObs, sigma) %>%
+  select(evalMethod, nObs, sigma, mse, mse_error) %>%
+  mutate(mse_ipw = round(mse, 4),
+         mse_error_ipw = round(mse_error, 4)) %>%
+  select(-c(mse, mse_error, evalMethod))
+
+temp3 <- summaryResults %>%
+  filter(evalMethod == "sIPW") %>%
+  mutate(nObs = as.numeric(nObs)) %>%
+  arrange(nObs, sigma) %>%
+  select(evalMethod, nObs, sigma, mse, mse_error) %>%
+  mutate(mse_sipw = round(mse, 4),
+         mse_error_sipw = round(mse_error, 4)) %>%
+  select(-c(mse, mse_error, evalMethod))
+
+temp4 <- summaryResults %>%
+  filter(evalMethod == "gcomp") %>%
+  mutate(nObs = as.numeric(nObs)) %>%
+  arrange(nObs, sigma) %>%
+  select(evalMethod, nObs, sigma, mse, mse_error) %>%
+  mutate(mse_gcomp = round(mse, 4),
+         mse_error_gcomp = round(mse_error, 4)) %>%
+  select(-c(mse, mse_error, evalMethod))
+
+left_join(temp2, temp3, by = c("nObs", "sigma")) %>%
+  left_join(temp4, by = c("nObs", "sigma")) %>%
+  left_join(temp1, by = c("nObs", "sigma")) %>%
+  xtable(digits = 4)
+
+# create results for table 2
+tempA <- summaryResults %>%
+  filter(evalMethod == "IPW") %>%
+  mutate(nObs = as.numeric(nObs)) %>%
+  arrange(nObs, sigma) %>%
+  select(evalMethod, nObs, sigma, meanNorm1, meanNorm2) %>%
+  mutate(meanNorm1_ipw = round(meanNorm1, 4),
+         meanNorm2_ipw = round(meanNorm2, 4)) %>%
+  select(-c(evalMethod, meanNorm1, meanNorm2))
+
+tempB <- summaryResults %>%
+  filter(evalMethod == "sIPW") %>%
+  mutate(nObs = as.numeric(nObs)) %>%
+  arrange(nObs, sigma) %>%
+  select(evalMethod, nObs, sigma, meanNorm1, meanNorm2) %>%
+  mutate(meanNorm1_sipw = round(meanNorm1, 4),
+         meanNorm2_sipw = round(meanNorm2, 4)) %>%
+  select(-c(evalMethod, meanNorm1, meanNorm2))
+
+tempC <- summaryResults %>%
+  filter(evalMethod == "gcomp") %>%
+  mutate(nObs = as.numeric(nObs)) %>%
+  arrange(nObs, sigma) %>%
+  select(evalMethod, nObs, sigma, meanNorm1, meanNorm2) %>%
+  mutate(meanNorm1_gcomp = round(meanNorm1, 4),
+         meanNorm2_gcomp = round(meanNorm2, 4)) %>%
+  select(-c(evalMethod, meanNorm1, meanNorm2))
+
+tempD <- summaryResults %>%
+  filter(evalMethod == "AIPWE") %>%
+  mutate(nObs = as.numeric(nObs)) %>%
+  arrange(nObs, sigma) %>%
+  select(evalMethod, nObs, sigma, meanNorm1, meanNorm2) %>%
+  mutate(meanNorm1_aipwe = round(meanNorm1, 4),
+         meanNorm2_aipwe = round(meanNorm2, 4)) %>%
+  select(-c(evalMethod, meanNorm1, meanNorm2))
+
+left_join(tempA, tempB, by = c("nObs", "sigma")) %>%
+  left_join(tempC, by = c("nObs", "sigma")) %>%
+  left_join(tempD, by = c("nObs", "sigma")) %>%
+  xtable(digits = 4)
+```
+
+
+```{r, message = FALSE}
+# Place to hold the analysis
+out <- data.frame()
+
+for(i in 1:length(filenames)){
+  # Read in the csv with the simulation results
+  results <- read_csv(paste0(relativePathToResults, "/", filenames[i])) 
+  
+  # Extract the meta data
+  metaData <- str_split(str_sub(filenames[i], start = 17), pattern = "_")
+  evalMethod <- metaData[[1]][1]
+  nObs <- as.numeric(metaData[[1]][2])
+  sigma <- as.numeric(str_split(metaData[[1]][3], pattern = ".csv")[[1]][1])
+  if(sigma != 1.25) next
+  # CV <- if_else(sigma < 1, 0.75, if_else(sigma > 1, 1.25, 1))
+  
+  # Compute the MSE for the optimal DTR
+  MSE <- (1/1000)*sum((-1*results$optDTR_value - trueOpt)^2)
+  MSE_MCerror <- sqrt((1/(1000*(1000-1)))*sum((-1*results$optDTR_value - trueOpt)^2 - MSE)^2)
+  
+  # Compute the average distance of the GP from the truth over the whole space
+  avgNorm_sup <- mean(results$norm_sup)
+  avgNorm_sup_MCerror <- sqrt((1/(1000*(1000-1)))*sum((results$norm_sup - avgNorm_sup)^2))
+  avgNorm_1 <- mean(results$norm_1)
+  avgNorm_1_MCerror <- sqrt((1/(1000*(1000-1)))*sum((results$norm_1 - avgNorm_1)^2))
+  avgNorm_2 <- mean(results$norm_2)
+  avgNorm_2_MCerror <- sqrt((1/(1000*(1000-1)))*sum((results$norm_2 - avgNorm_2)^2))
+  
+  out <- out %>% bind_rows(data.frame(evalMethod = evalMethod,
+                                      nObs = nObs,
+                                      sigma = sigma,
+                                      MSE = MSE, 
+                                      MSE_MCerror = MSE_MCerror,
+                                      avgNorm_sup = avgNorm_sup,
+                                      avgNorm_sup_MCerror = avgNorm_sup_MCerror,
+                                      avgNorm_1 = avgNorm_1,
+                                      avgNorm_1_MCerror = avgNorm_1_MCerror,
+                                      avgNorm_2 = avgNorm_2,
+                                      avgNorm_2_MCerror = avgNorm_2_MCerror))
+}
+
+
+
+out %>%
+  # mutate_if(is.numeric, round, 6) %>%
+  write_csv("../2_pipeline/3_simulation1D3_analysis.csv")
+```
+
+
+
