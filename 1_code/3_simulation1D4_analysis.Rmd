@@ -122,8 +122,8 @@ temp1 <- summaryResults %>%
   mutate(nObs = as.numeric(nObs)) %>%
   arrange(nObs, sigma) %>%
   select(evalMethod, nObs, sigma, mse, mse_error) %>%
-  mutate(mse_aipwe = round(mse, 4),
-         mse_error_aipwe = round(mse_error, 4)) %>%
+  mutate(mse_aipwe = round(mse, 7),
+         mse_error_aipwe = round(mse_error, 7)) %>%
   select(-c(mse, mse_error, evalMethod))
 
 temp2 <- summaryResults %>%
@@ -131,8 +131,8 @@ temp2 <- summaryResults %>%
   mutate(nObs = as.numeric(nObs)) %>%
   arrange(nObs, sigma) %>%
   select(evalMethod, nObs, sigma, mse, mse_error) %>%
-  mutate(mse_ipw = round(mse, 4),
-         mse_error_ipw = round(mse_error, 4)) %>%
+  mutate(mse_ipw = round(mse, 7),
+         mse_error_ipw = round(mse_error, 7)) %>%
   select(-c(mse, mse_error, evalMethod))
 
 temp3 <- summaryResults %>%
@@ -140,8 +140,8 @@ temp3 <- summaryResults %>%
   mutate(nObs = as.numeric(nObs)) %>%
   arrange(nObs, sigma) %>%
   select(evalMethod, nObs, sigma, mse, mse_error) %>%
-  mutate(mse_sipw = round(mse, 4),
-         mse_error_sipw = round(mse_error, 4)) %>%
+  mutate(mse_sipw = round(mse, 7),
+         mse_error_sipw = round(mse_error, 7)) %>%
   select(-c(mse, mse_error, evalMethod))
 
 temp4 <- summaryResults %>%
@@ -149,13 +149,15 @@ temp4 <- summaryResults %>%
   mutate(nObs = as.numeric(nObs)) %>%
   arrange(nObs, sigma) %>%
   select(evalMethod, nObs, sigma, mse, mse_error) %>%
-  mutate(mse_gcomp = round(mse, 4),
-         mse_error_gcomp = round(mse_error, 4)) %>%
+  mutate(mse_gcomp = round(mse, 7),
+         mse_error_gcomp = round(mse_error, 7)) %>%
   select(-c(mse, mse_error, evalMethod))
 
 left_join(temp2, temp3, by = c("nObs", "sigma")) %>%
   left_join(temp4, by = c("nObs", "sigma")) %>%
   left_join(temp1, by = c("nObs", "sigma")) %>%
+  mutate_all(function(x){x * 1000}) %>% # scale by 10^-3
+  mutate(nObs = nObs/1000, sigma = sigma/1000) %>%
   xtable(digits = 4)
 
 # create results for table 2
@@ -164,8 +166,8 @@ tempA <- summaryResults %>%
   mutate(nObs = as.numeric(nObs)) %>%
   arrange(nObs, sigma) %>%
   select(evalMethod, nObs, sigma, meanNorm1, meanNorm2) %>%
-  mutate(meanNorm1_ipw = round(meanNorm1, 4),
-         meanNorm2_ipw = round(meanNorm2, 4)) %>%
+  mutate(meanNorm1_ipw = round(meanNorm1, 7),
+         meanNorm2_ipw = round(meanNorm2, 7)) %>%
   select(-c(evalMethod, meanNorm1, meanNorm2))
 
 tempB <- summaryResults %>%
@@ -173,8 +175,8 @@ tempB <- summaryResults %>%
   mutate(nObs = as.numeric(nObs)) %>%
   arrange(nObs, sigma) %>%
   select(evalMethod, nObs, sigma, meanNorm1, meanNorm2) %>%
-  mutate(meanNorm1_sipw = round(meanNorm1, 4),
-         meanNorm2_sipw = round(meanNorm2, 4)) %>%
+  mutate(meanNorm1_sipw = round(meanNorm1, 7),
+         meanNorm2_sipw = round(meanNorm2, 7)) %>%
   select(-c(evalMethod, meanNorm1, meanNorm2))
 
 tempC <- summaryResults %>%
@@ -182,8 +184,8 @@ tempC <- summaryResults %>%
   mutate(nObs = as.numeric(nObs)) %>%
   arrange(nObs, sigma) %>%
   select(evalMethod, nObs, sigma, meanNorm1, meanNorm2) %>%
-  mutate(meanNorm1_gcomp = round(meanNorm1, 4),
-         meanNorm2_gcomp = round(meanNorm2, 4)) %>%
+  mutate(meanNorm1_gcomp = round(meanNorm1, 7),
+         meanNorm2_gcomp = round(meanNorm2, 7)) %>%
   select(-c(evalMethod, meanNorm1, meanNorm2))
 
 tempD <- summaryResults %>%
@@ -191,13 +193,15 @@ tempD <- summaryResults %>%
   mutate(nObs = as.numeric(nObs)) %>%
   arrange(nObs, sigma) %>%
   select(evalMethod, nObs, sigma, meanNorm1, meanNorm2) %>%
-  mutate(meanNorm1_aipwe = round(meanNorm1, 4),
-         meanNorm2_aipwe = round(meanNorm2, 4)) %>%
+  mutate(meanNorm1_aipwe = round(meanNorm1, 7),
+         meanNorm2_aipwe = round(meanNorm2, 7)) %>%
   select(-c(evalMethod, meanNorm1, meanNorm2))
 
 left_join(tempA, tempB, by = c("nObs", "sigma")) %>%
   left_join(tempC, by = c("nObs", "sigma")) %>%
   left_join(tempD, by = c("nObs", "sigma")) %>%
+   mutate_all(function(x){x * 100}) %>% # scale by 10^-2
+  mutate(nObs = nObs/100, sigma = sigma/100) %>%
   xtable(digits = 4)
 ```
 

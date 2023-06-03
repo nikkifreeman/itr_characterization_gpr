@@ -1,0 +1,148 @@
+---
+title: "10_realDataAnalysis"
+output: html_notebook
+---
+
+```{r setup}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+```
+
+```{r "packages and data"}
+# Load packages
+library(tidyverse)
+
+# Load data
+analysisData <- read_csv(file = "../2_pipeline/9_analysisData.csv") 
+```
+
+
+# Propensity scores
+```{r}
+# Fit a logistic regression model to get the propensity scores
+lrModel <- glm(revasc ~ C0 + initial_size + num_wounds + age + CVD + COPD + 
+                 CHF + CAD + diabetes + HLD + HTN + obesity + smoker + 
+                 foot_wound + toe_wound + heel_wound + ankle_wound +
+                 white + female + hispanic, family = "binomial", data = analysisData)
+ps <- predict(lrModel, analysisData %>% select(C0, initial_size, num_wounds, age, CVD, COPD, 
+                                         CHF, CAD, diabetes, HLD, HTN, obesity, smoker, 
+                                         foot_wound, toe_wound, heel_wound, ankle_wound,
+                                         white, female, hispanic), type = "response")
+# Add the propensity scores to the analysis dataframe
+analysisData <- analysisData %>%
+  add_column(ps)
+
+# Assess overlap
+analysisData %>%
+  mutate(revasc = factor(revasc)) %>%
+  ggplot(aes(y = ps, fill = revasc, group = revasc)) +
+  geom_histogram(alpha = 0.5) +
+  geom_density(alpha = 0.6) +
+  coord_flip() +
+  theme_minimal()
+
+# Assess balance within quintiles
+psQuintiles <- round(quantile(analysisData$ps, probs = seq(from = 0, 1, by = 0.1)), 2)
+psQuintiles
+analysisData <- analysisData %>%
+  mutate(ps_quint = if_else(ps < psQuintiles[2], 1, -1),
+         ps_quint = if_else(ps >= psQuintiles[2] & ps < psQuintiles[3], 2, ps_quint),
+         ps_quint = if_else(ps >= psQuintiles[3] & ps < psQuintiles[4], 3, ps_quint),
+         ps_quint = if_else(ps >= psQuintiles[4] & ps < psQuintiles[5], 4, ps_quint),
+         ps_quint = if_else(ps >= psQuintiles[5] & ps < psQuintiles[6], 5, ps_quint),
+         ps_quint = if_else(ps >= psQuintiles[6] & ps < psQuintiles[7], 6, ps_quint),
+         ps_quint = if_else(ps >= psQuintiles[7] & ps < psQuintiles[8], 7, ps_quint),
+         ps_quint = if_else(ps >= psQuintiles[8] & ps < psQuintiles[9], 8, ps_quint),
+         ps_quint = if_else(ps >= psQuintiles[9] & ps < psQuintiles[10], 9, ps_quint),
+         ps_quint = if_else(ps >= psQuintiles[10], 10, ps_quint))
+analysisData %>%group_by(ps_quint, revasc) %>%
+  summarise(ps_mean = round(mean(ps), 2))
+
+# Balance was not achieved in the 1st and 2nd decile
+# Exclude those individuals from the analysis
+analysisData <- analysisData %>% filter(ps_quint >2)
+
+# ps plot after removing individuals w/o common support
+psOverlapPlot <- analysisData %>%
+  mutate(revasc = factor(revasc)) %>%
+  ggplot(aes(y = ps, fill = revasc, group = revasc)) +
+  # geom_histogram(alpha = 0.5) +
+  geom_density(alpha = 0.6) +
+  scale_fill_discrete(name = "Revascularized \nat 1 month") +
+  coord_flip() +
+  theme_minimal() +
+  xlab("Density") +
+  ylab("Estimated propensity score")
+
+ggsave(filename = "../3_output/10_psOverlap.png", plot = psOverlapPlot,
+       units = "in", width = 8, height = 4, bg = "white")
+```
+
+# Fit GP and find optimal ITR
+```{r}
+# Write analysis data with ps to drive
+write_csv(analysisData, file = "../2_pipeline/10_analysisData.csv")
+
+# Do analysis in python
+```
+
+# Load results from python
+```{r}
+# Import results from python
+policiesExplored <- read_csv("../2_pipeline/10_policiesExplored.csv") %>%
+  mutate(values = -1*values) # Convert back so that bigger numbers are better
+optimalTheta <- read_csv("../2_pipeline/10_optimalTheta.csv")
+```
+
+# Explore the results 
+```{r}
+policiesExplored %>%
+  ggplot(aes(x = theta1, y = theta2, color = values)) +
+  geom_point() +
+  scale_color_gradient(low = "red", high = "green") +
+  xlab("Compliance") +
+  ylab("Wound size")
+
+optimalTheta
+```
+# Contour plot
+```{r}
+valueSurrogateDF <- read_csv("../2_pipeline/10_gpValueSurrogateOverTheta.csv") %>%
+  mutate(gp_mean = str_remove(gp_mean, "\\[*"),
+         gp_mean = str_remove(gp_mean, "\\]"),
+         gp_mean = str_remove(gp_mean, "\\]"),
+         gp_mean = as.numeric(gp_mean),
+         gp_sd = str_remove(gp_sd, "\\["),
+         gp_sd = str_remove(gp_sd, "\\]"),
+         gp_sd = as.numeric(gp_sd)) 
+
+valueSurrogateContourPlot <- valueSurrogateDF %>%
+  mutate(gp_mean = -1*gp_mean) %>%
+  ggplot(aes(x = theta1, y = theta2, z = gp_mean)) +
+  geom_contour_filled(breaks = c(0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.50, 0.55)) +
+  scale_fill_brewer(palette = 8, name = "Mean of GP surrogate \nfor value function") +
+  geom_point(aes(x = optimalTheta$theta[1], y = optimalTheta$theta[2]), color = "white", shape = 8) +
+  geom_point(data = policiesExplored %>% 
+               mutate(gp_mean = 0) %>%
+               filter(theta1 != optimalTheta$theta[1]), aes(x = theta1, y = theta2), color = "black") +
+  theme_minimal() +
+  xlab("Baseline compliance (prop.)") +
+  ylab("Initial wound size (cm^2)")
+
+valueSurrogateContourPlot
+
+ggsave(valueSurrogateContourPlot, filename = "../3_output/10_contourGPsurrogate.png", device = "png", width = 7, height = 5)
+```
+
+# 3d plot
+```{r}
+library(plotly)
+
+plot_ly(data = policiesExplored, x = ~theta1, y = ~theta2, z = ~values,
+        marker = list(color = ~values, symbol = 'circle', sizemode = 'diameter', showscale = TRUE), sizes = c(5, 50)) %>%
+  add_markers() %>%
+  layout(scene = list(xaxis = list(title = 'Baseline compliance (prop.)'),
+                      yaxis = list(title = 'Initial wound size (cm^2)'),
+                      zaxis = list(title = "Value under policy")),
+         annotations = list(text = "Estimated value", x = 1.15, y = 1.05, showarrow = FALSE)) 
+```
+
